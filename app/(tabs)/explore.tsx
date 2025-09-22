@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import MiniPlayer from '../components/MiniPlayer';
 
 export default function ExploreScreen() {
   return (
@@ -22,3 +23,4 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
+<MiniPlayer />

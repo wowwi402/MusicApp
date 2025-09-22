@@ -1,5 +1,6 @@
 // app/(tabs)/_layout.tsx
 import { Tabs } from 'expo-router';
+import MiniPlayer from '../components/MiniPlayer';
 
 export default function TabLayout() {
   return (
@@ -10,6 +11,7 @@ export default function TabLayout() {
       <Tabs.Screen name="playlists" options={{ title: 'Playlists' }} />
       <Tabs.Screen name="favorites" options={{ title: 'Favorites' }} />
       <Tabs.Screen name="history" options={{ title: 'History' }} />
+      <MiniPlayer />
     </Tabs>
   );
 }

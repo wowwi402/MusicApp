@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import MiniPlayer from '../components/MiniPlayer';
 
 type Song = { id: string; title: string; artist: string; url: string; cover: string };
 const HISTORY_KEY = 'history:list';
@@ -79,6 +80,7 @@ export default function HistoryScreen() {
           )}
         />
       )}
+      <MiniPlayer />
     </View>
   );
 }

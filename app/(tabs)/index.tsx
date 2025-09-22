@@ -4,7 +4,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React from 'react';
 import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import MiniPlayer from '../components/MiniPlayer';
 import { colors } from './theme';
+
 
 const SONGS = [
   { id: '1', title: 'SoundHelix Song 1', artist: 'SoundHelix', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', cover: 'https://picsum.photos/seed/1/600' },
@@ -39,6 +41,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
       />
+      <MiniPlayer />
     </LinearGradient>
   );
 }

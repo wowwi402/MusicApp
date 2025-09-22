@@ -6,13 +6,16 @@ import { Audio, AVPlaybackStatus, AVPlaybackStatusSuccess } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import MiniPlayer from '../components/MiniPlayer';
 import { colors } from './theme';
+
 
 type Song = { id: string; title: string; artist: string; url: string; cover: string };
 
-const PLAYLIST_KEY = 'playlist:default';
-const HISTORY_KEY = 'history:list';
+const PLAYLIST_KEY  = 'playlist:default';
+const FAVORITES_KEY = 'favorites:list';
+const HISTORY_KEY   = 'history:list';
 const HISTORY_LIMIT = 50;
 
 export default function PlayerScreen() {
@@ -38,12 +41,15 @@ export default function PlayerScreen() {
 
   const soundRef = useRef<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(1);
+  const [position, setPosition]   = useState(0);
+  const [duration, setDuration]   = useState(1);
 
   const [shuffle, setShuffle] = useState(false);
-  const [repeat, setRepeat] = useState<'off' | 'one' | 'all'>('off');
-  const [volume, setVolume] = useState(1);
+  const [repeat, setRepeat]   = useState<'off' | 'one' | 'all'>('off');
+  const [volume, setVolume]   = useState(1);
+
+  // trạng thái xem bài hiện tại có nằm trong Favorites không
+  const [isFav, setIsFav] = useState(false);
 
   // Lưu lịch sử khi đổi bài (mới nhất lên đầu)
   useEffect(() => {
@@ -55,6 +61,15 @@ export default function PlayerScreen() {
         const next = [track, ...withoutDup].slice(0, HISTORY_LIMIT);
         await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
       } catch {}
+    })();
+
+    // kiểm tra trạng thái yêu thích
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(FAVORITES_KEY);
+        const arr: Song[] = raw ? JSON.parse(raw) : [];
+        setIsFav(arr.some(s => s.id === track.id));
+      } catch { setIsFav(false); }
     })();
   }, [track.id]);
 
@@ -112,8 +127,26 @@ export default function PlayerScreen() {
       const arr: Song[] = raw ? JSON.parse(raw) : [];
       const withoutDup = arr.filter((s) => s.id !== track.id);
       await AsyncStorage.setItem(PLAYLIST_KEY, JSON.stringify([...withoutDup, track]));
+      Alert.alert('Đã thêm vào Playlist');
     } catch {}
   }
+
+  async function toggleFavorite() {
+    try {
+      const raw = await AsyncStorage.getItem(FAVORITES_KEY);
+      const arr: Song[] = raw ? JSON.parse(raw) : [];
+      if (arr.some(s => s.id === track.id)) {
+        const next = arr.filter(s => s.id !== track.id);
+        await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+        setIsFav(false);
+      } else {
+        const next = [track, ...arr];
+        await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+        setIsFav(true);
+      }
+    } catch {}
+  }
+
   async function shareSong() {
     try {
       await Share.share({ message: `🎵 ${track.title} - ${track.artist}\n${track.url}` });
@@ -127,17 +160,21 @@ export default function PlayerScreen() {
 
   return (
     <LinearGradient colors={[colors.bgFrom, colors.bgTo]} style={{ flex: 1 }}>
-      {/* DÙNG ScrollView để tránh cover đẩy các phần khác ra ngoài màn hình */}
       <ScrollView contentContainerStyle={styles.container}>
         {/* Header */}
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle} numberOfLines={1}>Now Playing</Text>
-          <TouchableOpacity onPress={shareSong} style={styles.iconBtn}>
-            <Ionicons name="share-social" size={20} color={colors.text} />
-          </TouchableOpacity>
+          <View style={{ flexDirection:'row', gap:8 }}>
+            <TouchableOpacity onPress={toggleFavorite} style={styles.iconBtn}>
+              <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={20} color={isFav ? '#ff6b81' : colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={shareSong} style={styles.iconBtn}>
+              <Ionicons name="share-social" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Cover: GIỚI HẠN KÍCH THƯỚC */}
+        {/* Cover */}
         <View style={styles.coverWrap}>
           <Image source={{ uri: track.cover }} style={styles.cover} />
         </View>
@@ -211,19 +248,17 @@ export default function PlayerScreen() {
           <Ionicons name="volume-high" size={18} color={colors.sub} />
         </View>
       </ScrollView>
+      <MiniPlayer />
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  // Dùng flexGrow để ScrollView căn giữa đẹp và có thể cuộn khi thiếu chỗ
   container: { flexGrow: 1, paddingTop: 20, paddingBottom: 20, alignItems: 'center' },
-
   headerRow: { width: '92%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   headerTitle: { color: colors.sub, fontSize: 14, letterSpacing: 0.5 },
   iconBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff10' },
 
-  // ✅ Giới hạn ảnh để không che hết màn hình
   coverWrap: { width: '85%', maxWidth: 420, aspectRatio: 1, borderRadius: 24, overflow: 'hidden', marginTop: 12, backgroundColor: '#111' },
   cover: { width: '100%', height: '100%', resizeMode: 'cover' },
 
