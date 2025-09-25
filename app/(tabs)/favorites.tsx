@@ -1,13 +1,10 @@
-// app/(tabs)/favorites.tsx
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import MiniPlayer from '../components/MiniPlayer';
 import { colors } from './theme';
-
 
 type Song = { id: string; title: string; artist: string; url: string; cover: string };
 const FAVORITES_KEY = 'favorites:list';
@@ -19,9 +16,7 @@ export default function FavoritesScreen() {
     try {
       const raw = await AsyncStorage.getItem(FAVORITES_KEY);
       setItems(raw ? (JSON.parse(raw) as Song[]) : []);
-    } catch {
-      setItems([]);
-    }
+    } catch { setItems([]); }
   };
 
   useFocusEffect(useCallback(() => { load(); }, []));
@@ -52,20 +47,20 @@ export default function FavoritesScreen() {
         <Text style={styles.header}>Favorites ({items.length})</Text>
         {items.length > 0 && (
           <TouchableOpacity style={styles.clearBtn} onPress={clearAll}>
-            <Text style={{ color: '#fff', fontWeight: '700' }}>Clear</Text>
+            <Text style={{ color: '#fff', fontFamily: 'Inter_700Bold' }}>Clear</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {items.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={{ color: '#777' }}>Chưa có bài nào được ❤️. Hãy mở Player và bấm trái tim nhé!</Text>
+          <Text style={{ color: '#777' }}>Chưa có bài nào được ❤️. Vào Player bấm trái tim nhé!</Text>
         </View>
       ) : (
         <FlatList
           data={items}
           keyExtractor={(it, idx) => it.id + '-' + idx}
-          contentContainerStyle={{ padding: 16, gap: 12 }}
+          contentContainerStyle={{ padding: 16, gap: 14 }}
           renderItem={({ item, index }) => (
             <View style={styles.card}>
               <TouchableOpacity style={{ flexDirection:'row', alignItems:'center', flex:1, gap:12 }} onPress={() => playFromFav(index)}>
@@ -74,35 +69,37 @@ export default function FavoritesScreen() {
                   <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
                   <Text style={styles.artist} numberOfLines={1}>{item.artist}</Text>
                 </View>
-                <Ionicons name="play" size={18} color="#fff" style={styles.playBtn} />
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={() => removeOne(item.id)} style={styles.removeBtn}>
-                <Ionicons name="trash" size={16} color="#fff" />
-              </TouchableOpacity>
-              <MiniPlayer />
-
+              <View style={{ flexDirection:'row', gap:6 }}>
+                <TouchableOpacity onPress={() => playFromFav(index)} style={styles.playBtn}>
+                  <Ionicons name="play" size={16} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => removeOne(item.id)} style={styles.removeBtn}>
+                  <Ionicons name="trash" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         />
       )}
     </View>
-    
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex:1, backgroundColor: '#0b1220' },
-  headerRow: { padding: 16, paddingBottom: 8, flexDirection: 'row', justifyContent:'space-between', alignItems:'center' },
-  header: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  headerRow: { padding: 16, paddingBottom: 8, flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+  header: { color: '#fff', fontSize: 22, fontFamily: 'Inter_700Bold' },
   clearBtn: { backgroundColor: '#e0245e', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
 
   empty: { flex:1, alignItems:'center', justifyContent:'center' },
 
-  card: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', backgroundColor: '#ffffff10', marginHorizontal: 16, padding: 12, borderRadius: 14 },
+  card: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', backgroundColor: '#ffffff10', padding: 12, borderRadius: 16 },
   cover: { width: 56, height: 56, borderRadius: 8, backgroundColor: '#111' },
-  title: { color: '#fff', fontWeight:'700' },
-  artist: { color: '#9ca3af' },
-  playBtn: { backgroundColor: colors.primary, padding: 8, borderRadius: 10 },
-  removeBtn: { marginLeft: 10, backgroundColor: '#ef4444', padding: 8, borderRadius: 10 },
+  title: { color: '#fff', fontFamily:'Inter_700Bold' },
+  artist: { color: '#9ca3af', fontFamily:'Inter_400Regular' },
+
+  playBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary, alignItems:'center', justifyContent:'center' },
+  removeBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#ef4444', alignItems:'center', justifyContent:'center' },
 });

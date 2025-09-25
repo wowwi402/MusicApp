@@ -1,22 +1,25 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+// app/_layout.tsx
+import { Inter_400Regular, Inter_500Medium, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
-
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import React from 'react';
+import { Text } from 'react-native';
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  const [loaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_700Bold,
+  });
 
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        {/* Nhóm tabs */}
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        {/* Modal mặc định */}
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
-  );
+  React.useEffect(() => {
+    if (!loaded) return;
+    // ✅ Ép kiểu để TS không báo lỗi
+    const RNText = Text as any;
+    RNText.defaultProps = RNText.defaultProps || {};
+    RNText.defaultProps.style = [{ fontFamily: 'Inter_500Medium' }];
+  }, [loaded]);
+
+  if (!loaded) return null;
+
+  return <Stack screenOptions={{ headerShown: false }} />;
 }
