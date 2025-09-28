@@ -7,9 +7,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import MiniPlayer from '../components/MiniPlayer';
+import * as PL from '../lib/playlists';
 import { colors } from './theme';
-
 
 type Song = { id: string; title: string; artist: string; url: string; cover: string };
 
@@ -48,10 +47,8 @@ export default function PlayerScreen() {
   const [repeat, setRepeat]   = useState<'off' | 'one' | 'all'>('off');
   const [volume, setVolume]   = useState(1);
 
-  // trạng thái xem bài hiện tại có nằm trong Favorites không
   const [isFav, setIsFav] = useState(false);
 
-  // Lưu lịch sử khi đổi bài (mới nhất lên đầu)
   useEffect(() => {
     (async () => {
       try {
@@ -63,7 +60,6 @@ export default function PlayerScreen() {
       } catch {}
     })();
 
-    // kiểm tra trạng thái yêu thích
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(FAVORITES_KEY);
@@ -73,7 +69,6 @@ export default function PlayerScreen() {
     })();
   }, [track.id]);
 
-  // Load & play khi đổi bài
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -86,7 +81,6 @@ export default function PlayerScreen() {
     return () => { mounted = false; soundRef.current?.unloadAsync(); soundRef.current = null; };
   }, [track.url]);
 
-  // Áp dụng volume khi thay đổi
   useEffect(() => { soundRef.current?.setVolumeAsync(volume).catch(()=>{}); }, [volume]);
 
   function onStatus(status: AVPlaybackStatus) {
@@ -122,13 +116,22 @@ export default function PlayerScreen() {
   const prev = () => shuffle ? setCurrent(Math.floor(Math.random()*list.length)) : setCurrent((i)=> (i-1+list.length)%list.length);
 
   async function addToPlaylist() {
-    try {
-      const raw = await AsyncStorage.getItem(PLAYLIST_KEY);
-      const arr: Song[] = raw ? JSON.parse(raw) : [];
-      const withoutDup = arr.filter((s) => s.id !== track.id);
-      await AsyncStorage.setItem(PLAYLIST_KEY, JSON.stringify([...withoutDup, track]));
-      Alert.alert('Đã thêm vào Playlist');
-    } catch {}
+  try {
+    // ưu tiên playlist vừa chọn ở tab
+    let target = (await PL.getLastUsed()) || (await PL.getAllNames())[0];
+
+    // nếu chưa có playlist nào -> tạo "My Playlist"
+    if (!target) {
+      target = 'My Playlist';
+      await PL.createPlaylist(target);
+      await PL.setLastUsed(target);
+    }
+
+    await PL.addSong(target, track);
+    Alert.alert(`Đã thêm vào "${target}"`);
+  } catch (e) {
+    Alert.alert('Lỗi', 'Không thể thêm vào playlist.');
+  }
   }
 
   async function toggleFavorite() {
@@ -192,7 +195,7 @@ export default function PlayerScreen() {
         </View>
         <Slider
           style={{ width: '92%', height: 40 }}
-          value={position / duration}
+          value={duration ? position / duration : 0}
           onSlidingComplete={seekTo}
           minimumValue={0} maximumValue={1} step={0.001}
           minimumTrackTintColor={colors.primary}
@@ -248,7 +251,7 @@ export default function PlayerScreen() {
           <Ionicons name="volume-high" size={18} color={colors.sub} />
         </View>
       </ScrollView>
-      <MiniPlayer />
+      {/* ❌ KHÔNG render MiniPlayer ở đây */}
     </LinearGradient>
   );
 }
@@ -258,23 +261,17 @@ const styles = StyleSheet.create({
   headerRow: { width: '92%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   headerTitle: { color: colors.sub, fontSize: 14, letterSpacing: 0.5 },
   iconBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff10' },
-
   coverWrap: { width: '85%', maxWidth: 420, aspectRatio: 1, borderRadius: 24, overflow: 'hidden', marginTop: 12, backgroundColor: '#111' },
   cover: { width: '100%', height: '100%', resizeMode: 'cover' },
-
   title: { color: colors.text, fontSize: 22, fontWeight: '700', marginTop: 12 },
   artist: { color: colors.sub, marginTop: 2 },
-
   timeRow: { width: '92%', flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 },
   time: { color: colors.sub, fontVariant: ['tabular-nums'] },
-
   controlsRow: { flexDirection: 'row', alignItems: 'center', gap: 18, marginTop: 14 },
   roundBtn: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff10' },
   playBtn: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
-
   extrasRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: '#ffffff10' },
   pillText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-
   volumeRow: { width: '92%', flexDirection: 'row', alignItems: 'center', marginTop: 12 },
 });

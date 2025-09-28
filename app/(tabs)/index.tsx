@@ -4,7 +4,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React from 'react';
 import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import MiniPlayer from '../components/MiniPlayer';
 import { colors } from './theme';
 
 
@@ -41,8 +40,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
       />
-      <MiniPlayer />
-    </LinearGradient>
+  </LinearGradient>
   );
 }
 
