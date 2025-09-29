@@ -1,9 +1,12 @@
+// app/(tabs)/playlists.tsx
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as PL from '../lib/playlists';
+
 type Song = PL.Song;
 
 export default function PlaylistsScreen() {
@@ -22,11 +25,11 @@ export default function PlaylistsScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
- const select = async (name: string) => {
-  setActive(name);
-  await PL.setLastUsed(name);          // ✅ nhớ playlist đang chọn
-  setSongs(await PL.getSongs(name));
-};
+  const select = async (name: string) => {
+    setActive(name);
+    await PL.setLastUsed(name);
+    setSongs(await PL.getSongs(name));
+  };
 
   const addNew = async () => {
     const name = creating.trim();
@@ -41,20 +44,28 @@ export default function PlaylistsScreen() {
     Alert.prompt?.('Đổi tên playlist', oldName, async (newName) => {
       const n = (newName || '').trim(); if (!n) return;
       await PL.renamePlaylist(oldName, n);
-      await load(); setActive(n);
+      await load();
+      setActive(n);
     });
   };
 
   const removeList = async (name: string) => {
-    Alert.alert('Xóa playlist', `Xóa "${name}"?`, [
-      { text: 'Hủy' },
-      { text: 'Xóa', style: 'destructive', onPress: async () => { await PL.deletePlaylist(name); await load(); } }
+    Alert.alert('Xoá playlist', `Xoá "${name}"?`, [
+      { text: 'Huỷ' },
+      { text: 'Xoá', style: 'destructive', onPress: async () => { await PL.deletePlaylist(name); await load(); } }
+    ]);
+  };
+
+  const clearAll = () => {
+    Alert.alert('Xoá tất cả', 'Bạn có chắc muốn xoá toàn bộ playlists?', [
+      { text: 'Huỷ' },
+      { text: 'Xoá', style: 'destructive', onPress: async () => { await PL.clearAll(); await load(); } }
     ]);
   };
 
   const playFrom = (index: number) => {
     if (!active) return;
-    router.push({ pathname: '/player', params: { queue: JSON.stringify(songs), index: String(index) } });
+    router.replace({ pathname: '/player', params: { queue: JSON.stringify(songs), index: String(index) } });
   };
 
   const removeSongFrom = async (id: string) => {
@@ -64,71 +75,96 @@ export default function PlaylistsScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      {/* Hàng tạo playlist */}
-      <View style={styles.newRow}>
-        <TextInput
-          placeholder="Tên playlist mới..."
-          placeholderTextColor="#94a3b8"
-          value={creating}
-          onChangeText={setCreating}
-          style={styles.input}
-        />
-        <TouchableOpacity style={styles.addBtn} onPress={addNew}><Ionicons name="add" size={18} color="#fff" /></TouchableOpacity>
-      </View>
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.headerRow}>
+          <Text style={styles.header}>Playlists ({names.length})</Text>
+          {names.length > 0 && (
+            <TouchableOpacity style={styles.clearBtn} onPress={clearAll}>
+              <Text style={{ color:'#fff', fontWeight:'700' }}>Clear All</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
-      {/* Danh sách playlist */}
-      <FlatList
-        horizontal
-        data={names}
-        keyExtractor={(n) => n}
-        contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            onPress={() => select(item)}
-            onLongPress={() => rename(item)}
-            style={[styles.tag, active === item && styles.tagActive]}
-          >
-            <Text style={{ color:'#fff' }}>{item}</Text>
-            <TouchableOpacity onPress={() => removeList(item)} style={styles.tagDel}><Ionicons name="close" size={12} color="#fff" /></TouchableOpacity>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={<Text style={{ color:'#9ca3af', paddingHorizontal:12 }}>Chưa có playlist. Tạo mới ở trên.</Text>}
-        showsHorizontalScrollIndicator={false}
-      />
-
-      {/* Bài trong playlist đang chọn */}
-      {active && (
-        <>
-          <Text style={styles.header}>Playlist: {active}</Text>
-          <FlatList
-            data={songs}
-            keyExtractor={(it, idx) => it.id + '-' + idx}
-            contentContainerStyle={{ padding: 12, gap: 12 }}
-            renderItem={({ item, index }) => (
-              <View style={styles.card}>
-                <TouchableOpacity style={{ flexDirection:'row', alignItems:'center', flex:1, gap:12 }} onPress={() => playFrom(index)}>
-                  <Image source={{ uri: item.cover }} style={styles.cover} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-                    <Text style={styles.artist} numberOfLines={1}>{item.artist}</Text>
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => removeSongFrom(item.id)} style={styles.removeBtn}>
-                  <Ionicons name="trash" size={16} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            )}
-            ListEmptyComponent={<Text style={{ color:'#9ca3af', paddingHorizontal:12 }}>Playlist trống.</Text>}
+        {/* Tạo playlist */}
+        <View style={styles.newRow}>
+          <TextInput
+            placeholder="Tên playlist mới..."
+            placeholderTextColor="#94a3b8"
+            value={creating}
+            onChangeText={setCreating}
+            style={styles.input}
           />
-        </>
-      )}
-    </View>
+          <TouchableOpacity style={styles.addBtn} onPress={addNew}>
+            <Ionicons name="add" size={18} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Danh sách playlist */}
+        <FlatList
+          horizontal
+          data={names}
+          keyExtractor={(n) => n}
+          contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
+          showsHorizontalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              onPress={() => select(item)}
+              onLongPress={() => rename(item)}
+              style={[styles.tag, active === item && styles.tagActive]}
+            >
+              <Text style={{ color:'#fff' }}>{item}</Text>
+              <TouchableOpacity onPress={() => removeList(item)} style={styles.tagDel}>
+                <Ionicons name="close" size={12} color="#fff" />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={<Text style={{ color:'#9ca3af', paddingHorizontal:12 }}>Chưa có playlist. Tạo mới ở trên.</Text>}
+        />
+
+        {/* Bài trong playlist đang chọn */}
+        {active && (
+          <>
+            <Text style={styles.subHeader}>Playlist: {active}</Text>
+            <FlatList
+              data={songs}
+              keyExtractor={(it, idx) => it.id + '-' + idx}
+              contentContainerStyle={{ padding: 12, gap: 12 }}
+              renderItem={({ item, index }) => (
+                <View style={styles.card}>
+                  <TouchableOpacity
+                    style={{ flexDirection:'row', alignItems:'center', flex:1, gap:12 }}
+                    onPress={() => playFrom(index)}
+                  >
+                    <Image source={{ uri: item.cover }} style={styles.cover} />
+                    <View style={{ flex:1 }}>
+                      <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+                      <Text style={styles.artist} numberOfLines={1}>{item.artist}</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => removeSongFrom(item.id)} style={styles.removeBtn}>
+                    <Ionicons name="trash" size={16} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              )}
+              ListEmptyComponent={<Text style={{ color:'#9ca3af', paddingHorizontal:12 }}>Playlist trống.</Text>}
+            />
+          </>
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#0b1220' },
   container: { flex:1, backgroundColor:'#0b1220' },
+
+  headerRow: { padding:12, paddingBottom:8, flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+  header: { color:'#fff', fontSize:18, fontWeight:'800' },
+  clearBtn: { backgroundColor:'#e0245e', paddingHorizontal:12, paddingVertical:8, borderRadius:10 },
+
   newRow: { flexDirection:'row', gap:8, padding:12 },
   input: { flex:1, backgroundColor:'#ffffff10', borderRadius:12, paddingHorizontal:12, color:'#fff', height:40 },
   addBtn: { width:40, height:40, borderRadius:12, backgroundColor:'#6366f1', alignItems:'center', justifyContent:'center' },
@@ -137,7 +173,8 @@ const styles = StyleSheet.create({
   tagActive: { backgroundColor:'#4f46e5' },
   tagDel: { marginLeft:6, backgroundColor:'#00000022', width:18, height:18, borderRadius:9, alignItems:'center', justifyContent:'center' },
 
-  header: { color:'#fff', fontSize:16, fontWeight:'700', paddingHorizontal:12, paddingTop:10 },
+  subHeader: { color:'#fff', fontSize:16, fontWeight:'700', paddingHorizontal:12, paddingTop:10 },
+
   card: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', backgroundColor:'#ffffff10', padding: 12, borderRadius: 14 },
   cover: { width: 56, height: 56, borderRadius: 8, backgroundColor: '#111' },
   title: { color:'#fff', fontWeight:'700' },
