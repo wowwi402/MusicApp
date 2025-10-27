@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { useAppTheme } from './theme';
 
+// ---- types ----
 type Song = {
   id: string;
   title: string;
@@ -29,7 +30,7 @@ type Song = {
   cover: string;
 };
 
-// storage keys
+// ---- storage keys ----
 const PLAYLIST_KEY = 'playlist:default';
 const FAVORITES_KEY = 'favorites:list';
 const HISTORY_KEY = 'history:list';
@@ -40,6 +41,7 @@ const REPEAT_KEY = 'player:repeat';
 const VOLUME_KEY = 'player:volume';
 const MUTE_KEY = 'player:mute';
 
+// helpers lưu/đọc
 async function save(key: string, val: any) {
   try {
     await AsyncStorage.setItem(key, JSON.stringify(val));
@@ -58,7 +60,7 @@ export default function PlayerScreen() {
   const { colors } = useAppTheme();
   const params = useLocalSearchParams<{ queue?: string; index?: string }>();
 
-  // Queue từ params
+  // 1. lấy queue (danh sách bài truyền vào bằng router)
   const list: Song[] = useMemo(() => {
     try {
       return params.queue
@@ -85,40 +87,50 @@ export default function PlayerScreen() {
     }
   }, [params.queue]);
 
-  // Index hiện tại
+  // 2. chỉ số bài đang phát
   const [current, setCurrent] = useState<number>(() => {
     const i = Number(params.index);
     return Number.isFinite(i) ? i : 0;
   });
+
+  // nếu điều hướng tới Player với index mới -> cập nhật current
   useEffect(() => {
     const i = Number(params.index);
     setCurrent(Number.isFinite(i) ? i : 0);
   }, [params.index, params.queue]);
 
+  // bài hiện tại
   const track = list[(current + list.length) % list.length];
 
-  // Audio
+  // 3. audio state
   const soundRef = useRef<Audio.Sound | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(1);
 
-  // Player settings
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [position, setPosition] = useState(0);   // ms
+  const [duration, setDuration] = useState(1);   // ms (tránh chia 0)
+
+  // 4. player settings
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState<'off' | 'one' | 'all'>('off');
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
 
-  // Favorite state
+  // 5. favorite flag cho bài hiện tại
   const [isFav, setIsFav] = useState(false);
 
-  // init: load settings
+  // khởi tạo ban đầu: lấy setting đã lưu (shuffle/repeat/volume/mute)
   useEffect(() => {
     (async () => {
-      setShuffle(await load<boolean>(SHUFFLE_KEY, false));
-      setRepeat(await load<'off' | 'one' | 'all'>(REPEAT_KEY, 'off'));
-      setVolume(await load<number>(VOLUME_KEY, 1));
-      setMuted(await load<boolean>(MUTE_KEY, false));
+      const s = await load<boolean>(SHUFFLE_KEY, false);
+      const r = await load<'off' | 'one' | 'all'>(REPEAT_KEY, 'off');
+      const v = await load<number>(VOLUME_KEY, 1);
+      const m = await load<boolean>(MUTE_KEY, false);
+      setShuffle(s);
+      setRepeat(r);
+      setVolume(v);
+      setMuted(m);
+
+      // cài audio mode cho iOS / background
       await Audio.setAudioModeAsync({
         staysActiveInBackground: true,
         playsInSilentModeIOS: true,
@@ -126,143 +138,188 @@ export default function PlayerScreen() {
     })();
   }, []);
 
-  // cập nhật history + fav mỗi khi đổi bài
+  // mỗi khi đổi bài:
+  //  - cập nhật history
+  //  - kiểm tra có trong favorites hay không
   useEffect(() => {
     (async () => {
-      // history
+      // history mới nhất lên đầu, bỏ trùng
       try {
         const raw = await AsyncStorage.getItem(HISTORY_KEY);
         const arr: Song[] = raw ? JSON.parse(raw) : [];
-        const next = [
-          track,
-          ...arr.filter((s) => s.id !== track.id),
-        ].slice(0, HISTORY_LIMIT);
-        await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+        const nextList = [track, ...arr.filter((s) => s.id !== track.id)].slice(
+          0,
+          HISTORY_LIMIT
+        );
+        await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(nextList));
       } catch {}
 
-      // fav?
+      // fav check
       try {
         const rawFav = await AsyncStorage.getItem(FAVORITES_KEY);
-        const favArr: Song[] = rawFav ? JSON.parse(rawFav) : [];
-        setIsFav(favArr.some((s) => s.id === track.id));
+        const favs: Song[] = rawFav ? JSON.parse(rawFav) : [];
+        setIsFav(favs.some((s) => s.id === track.id));
       } catch {
         setIsFav(false);
       }
     })();
   }, [track.id]);
 
-  // load & play khi đổi track
+  // helper: cập nhật state UI mỗi khi player có status mới
+  const handleStatus = (status: AVPlaybackStatus) => {
+    if (!('isLoaded' in status) || !status.isLoaded) return;
+    const s = status as AVPlaybackStatusSuccess;
+
+    // cập nhật UI
+    setIsPlaying(s.isPlaying ?? false);
+    setPosition(s.positionMillis ?? 0);
+    setDuration(s.durationMillis ?? 1);
+
+    // nếu bài kết thúc tự nhiên
+    if (s.didJustFinish && !s.isLooping) {
+      // gọi logic chuyển bài
+      handleSongEnd();
+    }
+  };
+
+  // load & play bài mới mỗi khi track.url đổi
   useEffect(() => {
-    let mounted = true;
+    let stopped = false;
+
     (async () => {
       try {
+        // dọn sound cũ
         if (soundRef.current) {
           await soundRef.current.unloadAsync();
+          soundRef.current.setOnPlaybackStatusUpdate(null);
           soundRef.current = null;
         }
+
+        // tạo sound mới cho bài hiện tại
         const { sound } = await Audio.Sound.createAsync(
           { uri: track.url },
           {
-            shouldPlay: true,
-            volume,
+            shouldPlay: true,       // tự play ngay
+            volume: volume,
             isMuted: muted,
-          },
-          onStatus
+          }
         );
-        if (!mounted) {
+
+        if (stopped) {
           await sound.unloadAsync();
           return;
         }
+
+        // gắn listener status
+        sound.setOnPlaybackStatusUpdate(handleStatus);
+
+        // lưu ref
         soundRef.current = sound;
-      } catch {}
+      } catch {
+        // nếu load bài lỗi (url die) thì không crash app
+      }
     })();
 
+    // cleanup khi component unmount HOẶC trước khi tạo sound mới
     return () => {
-      mounted = false;
-      soundRef.current?.unloadAsync();
-      soundRef.current = null;
+      stopped = true;
+      if (soundRef.current) {
+        soundRef.current.setOnPlaybackStatusUpdate(null);
+        soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
     };
-  }, [track.url]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track.url]); // track thay đổi => load bài mới
 
-  // apply volume / mute changes
+  // khi thay volume / mute -> apply vào player hiện tại + lưu
   useEffect(() => {
-    soundRef.current?.setVolumeAsync(volume).catch(() => {});
+    if (soundRef.current) {
+      soundRef.current.setVolumeAsync(volume).catch(() => {});
+    }
     save(VOLUME_KEY, volume);
   }, [volume]);
 
   useEffect(() => {
-    soundRef.current?.setIsMutedAsync(muted).catch(() => {});
+    if (soundRef.current) {
+      soundRef.current.setIsMutedAsync(muted).catch(() => {});
+    }
     save(MUTE_KEY, muted);
   }, [muted]);
 
-  // status callback
-  function onStatus(status: AVPlaybackStatus) {
-    if (!('isLoaded' in status) || !status.isLoaded) return;
-    const s = status as AVPlaybackStatusSuccess;
-    setIsPlaying(s.isPlaying);
-    setPosition(s.positionMillis ?? 0);
-    setDuration(s.durationMillis ?? 1);
-    if (s.didJustFinish && !s.isLooping) {
-      handleSongEnd();
-    }
-  }
-
+  // ---- điều khiển phát lại ----
   function handleSongEnd() {
+    // repeat one
     if (repeat === 'one') {
-      soundRef.current?.replayAsync();
-    } else if (shuffle) {
+      soundRef.current?.replayAsync().catch(() => {});
+      return;
+    }
+
+    // shuffle
+    if (shuffle) {
       setCurrent(Math.floor(Math.random() * list.length));
+      return;
+    }
+
+    // mặc định next
+    if (current < list.length - 1) {
+      setCurrent(current + 1);
+    } else if (repeat === 'all') {
+      setCurrent(0);
     } else {
-      if (current < list.length - 1) {
-        setCurrent(current + 1);
-      } else if (repeat === 'all') {
-        setCurrent(0);
-      }
+      // repeat off + hết list -> ngừng phát
+      // tắt isPlaying trong UI
+      setIsPlaying(false);
     }
   }
 
-  // controls
   async function togglePlayPause() {
     const s = soundRef.current;
     if (!s) return;
     const st = await s.getStatusAsync();
     if ('isLoaded' in st && st.isLoaded) {
-      st.isPlaying ? s.pauseAsync() : s.playAsync();
+      if (st.isPlaying) {
+        await s.pauseAsync();
+      } else {
+        await s.playAsync();
+      }
     }
   }
 
   async function seekTo(ratio: number) {
     const s = soundRef.current;
     if (!s) return;
-    const pos = Math.max(0, Math.min(duration, ratio * duration));
-    await s.setPositionAsync(pos);
+    const targetMs = Math.max(0, Math.min(duration, ratio * duration));
+    await s.setPositionAsync(targetMs);
   }
 
-  async function seekBy(seconds: number) {
+  async function seekBy(deltaSeconds: number) {
     const s = soundRef.current;
     if (!s) return;
-    const nextPos = Math.max(
+    const targetMs = Math.max(
       0,
-      Math.min(duration, position + seconds * 1000)
+      Math.min(duration, position + deltaSeconds * 1000)
     );
-    await s.setPositionAsync(nextPos);
+    await s.setPositionAsync(targetMs);
   }
 
-  const nextTrack = () => {
+  function goNext() {
     if (shuffle) {
       setCurrent(Math.floor(Math.random() * list.length));
     } else {
       setCurrent((i) => (i + 1) % list.length);
     }
-  };
-  const prevTrack = () => {
+  }
+
+  function goPrev() {
     if (shuffle) {
       setCurrent(Math.floor(Math.random() * list.length));
     } else {
       setCurrent((i) => (i - 1 + list.length) % list.length);
     }
-  };
+  }
 
+  // ---- playlist / favorite / share ----
   async function addToPlaylist() {
     try {
       const raw = await AsyncStorage.getItem(PLAYLIST_KEY);
@@ -278,18 +335,14 @@ export default function PlayerScreen() {
       const raw = await AsyncStorage.getItem(FAVORITES_KEY);
       const arr: Song[] = raw ? JSON.parse(raw) : [];
       if (arr.some((s) => s.id === track.id)) {
-        const nextFav = arr.filter((s) => s.id !== track.id);
-        await AsyncStorage.setItem(
-          FAVORITES_KEY,
-          JSON.stringify(nextFav)
-        );
+        // đã có -> remove
+        const next = arr.filter((s) => s.id !== track.id);
+        await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
         setIsFav(false);
       } else {
-        const nextFav = [track, ...arr];
-        await AsyncStorage.setItem(
-          FAVORITES_KEY,
-          JSON.stringify(nextFav)
-        );
+        // chưa có -> add
+        const next = [track, ...arr];
+        await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
         setIsFav(true);
       }
     } catch {}
@@ -303,13 +356,15 @@ export default function PlayerScreen() {
     } catch {}
   }
 
+  // format mm:ss
   const fmt = (ms: number) => {
     const totalSec = Math.floor(ms / 1000);
-    const m = Math.floor(totalSec / 60);
-    const s = totalSec % 60;
-    return `${m}:${String(s).padStart(2, '0')}`;
+    const mm = Math.floor(totalSec / 60);
+    const ss = totalSec % 60;
+    return `${mm}:${String(ss).padStart(2, '0')}`;
   };
 
+  // ---- UI ----
   return (
     <View
       style={[
@@ -318,12 +373,9 @@ export default function PlayerScreen() {
       ]}
     >
       <ScrollView
-        contentContainerStyle={[
-          styles.scrollBody,
-          { paddingBottom: 24 },
-        ]}
+        contentContainerStyle={[styles.scrollBody, { paddingBottom: 24 }]}
       >
-        {/* Header */}
+        {/* HEADER */}
         <View
           style={[
             styles.headerRow,
@@ -331,10 +383,7 @@ export default function PlayerScreen() {
           ]}
         >
           <Text
-            style={[
-              styles.headerTitle,
-              { color: colors.text },
-            ]}
+            style={[styles.headerTitle, { color: colors.text }]}
             numberOfLines={1}
           >
             Now Playing
@@ -377,12 +426,15 @@ export default function PlayerScreen() {
           </View>
         </View>
 
-        {/* Cover */}
+        {/* COVER */}
         <View style={styles.coverWrap}>
-          <Image source={{ uri: track.cover }} style={styles.cover} />
+          <Image
+            source={{ uri: track.cover }}
+            style={styles.cover}
+          />
         </View>
 
-        {/* Title / Artist */}
+        {/* TITLE / ARTIST */}
         <View style={styles.titleBlock}>
           <Text
             style={[styles.trackTitle, { color: colors.text }]}
@@ -398,21 +450,32 @@ export default function PlayerScreen() {
           </Text>
         </View>
 
-        {/* Progress row */}
+        {/* PROGRESS TIME */}
         <View
           style={[
             styles.timeRow,
             { width: '90%' },
           ]}
         >
-          <Text style={{ color: colors.sub, fontVariant: ['tabular-nums'] }}>
+          <Text
+            style={{
+              color: colors.sub,
+              fontVariant: ['tabular-nums'],
+            }}
+          >
             {fmt(position)}
           </Text>
-          <Text style={{ color: colors.sub, fontVariant: ['tabular-nums'] }}>
+          <Text
+            style={{
+              color: colors.sub,
+              fontVariant: ['tabular-nums'],
+            }}
+          >
             {fmt(duration)}
           </Text>
         </View>
 
+        {/* PROGRESS SLIDER */}
         <Slider
           style={{ width: '90%', height: 40 }}
           value={duration ? position / duration : 0}
@@ -425,12 +488,15 @@ export default function PlayerScreen() {
           thumbTintColor={colors.sliderThumb as string}
         />
 
-        {/* Controls */}
+        {/* CONTROLS */}
         <View style={styles.controlsRow}>
           <TouchableOpacity
             style={[
               styles.ctrlBtn,
-              { backgroundColor: colors.card, borderColor: colors.border },
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
             ]}
             onPress={() => seekBy(-10)}
           >
@@ -444,9 +510,12 @@ export default function PlayerScreen() {
           <TouchableOpacity
             style={[
               styles.ctrlBtn,
-              { backgroundColor: colors.card, borderColor: colors.border },
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
             ]}
-            onPress={prevTrack}
+            onPress={goPrev}
           >
             <Ionicons
               name="play-skip-back"
@@ -472,9 +541,12 @@ export default function PlayerScreen() {
           <TouchableOpacity
             style={[
               styles.ctrlBtn,
-              { backgroundColor: colors.card, borderColor: colors.border },
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
             ]}
-            onPress={nextTrack}
+            onPress={goNext}
           >
             <Ionicons
               name="play-skip-forward"
@@ -486,7 +558,10 @@ export default function PlayerScreen() {
           <TouchableOpacity
             style={[
               styles.ctrlBtn,
-              { backgroundColor: colors.card, borderColor: colors.border },
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
             ]}
             onPress={() => seekBy(10)}
           >
@@ -498,8 +573,9 @@ export default function PlayerScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Shuffle / Repeat / Playlist */}
+        {/* PILLS: SHUFFLE / REPEAT / PLAYLIST */}
         <View style={styles.rowPills}>
+          {/* Shuffle */}
           <TouchableOpacity
             style={[
               styles.pill,
@@ -519,45 +595,66 @@ export default function PlayerScreen() {
             <MaterialCommunityIcons
               name="shuffle-variant"
               size={16}
-              color={shuffle ? '#fff' : (colors.text as string)}
+              color={
+                shuffle ? '#fff' : (colors.text as string)
+              }
             />
             <Text
               style={[
                 styles.pillText,
-                { color: shuffle ? '#fff' : colors.text },
+                {
+                  color: shuffle ? '#fff' : colors.text,
+                },
               ]}
             >
               Shuffle
             </Text>
           </TouchableOpacity>
 
+          {/* Repeat */}
           <TouchableOpacity
             style={[
               styles.pill,
               {
                 backgroundColor:
-                  repeat !== 'off' ? colors.primary : colors.pillBg,
+                  repeat !== 'off'
+                    ? colors.primary
+                    : colors.pillBg,
                 borderColor: colors.border,
               },
             ]}
             onPress={async () => {
               const nxt =
-                repeat === 'off' ? 'one' : repeat === 'one' ? 'all' : 'off';
+                repeat === 'off'
+                  ? 'one'
+                  : repeat === 'one'
+                  ? 'all'
+                  : 'off';
               setRepeat(nxt);
               await save(REPEAT_KEY, nxt);
             }}
           >
             <MaterialCommunityIcons
-              name={repeat === 'one' ? 'repeat-once' : 'repeat'}
+              name={
+                repeat === 'one'
+                  ? 'repeat-once'
+                  : 'repeat'
+              }
               size={16}
-              color={repeat === 'off' ? (colors.text as string) : '#fff'}
+              color={
+                repeat === 'off'
+                  ? (colors.text as string)
+                  : '#fff'
+              }
             />
             <Text
               style={[
                 styles.pillText,
                 {
                   color:
-                    repeat === 'off' ? colors.text : '#fff',
+                    repeat === 'off'
+                      ? colors.text
+                      : '#fff',
                 },
               ]}
             >
@@ -569,6 +666,7 @@ export default function PlayerScreen() {
             </Text>
           </TouchableOpacity>
 
+          {/* Add to Playlist */}
           <TouchableOpacity
             style={[
               styles.pill,
@@ -580,13 +678,18 @@ export default function PlayerScreen() {
             onPress={addToPlaylist}
           >
             <Ionicons name="add" size={16} color="#fff" />
-            <Text style={[styles.pillText, { color: '#fff' }]}>
+            <Text
+              style={[
+                styles.pillText,
+                { color: '#fff' },
+              ]}
+            >
               Playlist
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Volume */}
+        {/* VOLUME */}
         <View style={[styles.volumeRow, { width: '90%' }]}>
           <TouchableOpacity
             style={[
@@ -620,7 +723,11 @@ export default function PlayerScreen() {
           </View>
 
           <Text
-            style={{ color: colors.sub, width: 48, textAlign: 'right' }}
+            style={{
+              color: colors.sub,
+              width: 48,
+              textAlign: 'right',
+            }}
           >
             {Math.round(volume * 100)}%
           </Text>
@@ -630,7 +737,7 @@ export default function PlayerScreen() {
   );
 }
 
-// styles
+// ---- styles ----
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
