@@ -11,49 +11,48 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
-
-import * as PL from '../lib/playlists';
 import { useAppTheme } from './theme';
 
-// kiểu bài hát trong playlist
 import type { Song } from '../lib/playlists';
+import * as PL from '../lib/playlists';
 
 type SortKey = 'added' | 'title' | 'artist';
 
 export default function PlaylistsScreen() {
   const { colors } = useAppTheme();
 
-  const [names, setNames] = useState<string[]>([]);
-  const [active, setActive] = useState<string | null>(null);
+  const [allNames, setAllNames] = useState<string[]>([]);
+  const [activeName, setActiveName] = useState<string | null>(null);
   const [rawSongs, setRawSongs] = useState<Song[]>([]);
-  const [creating, setCreating] = useState('');
+  const [newName, setNewName] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('added');
 
-  // load tất cả playlists + chọn playlist cuối cùng user dùng
-  const load = useCallback(async () => {
-    const list = await PL.getAllNames(); // ['My Playlist', 'Chill', ...]
-    setNames(list);
+  // tải lại toàn bộ playlists + playlist đang active
+  const reloadAll = useCallback(async () => {
+    const names = await PL.getAllNames();
+    const last = (await PL.getLastUsed()) || names[0] || null;
 
-    const last = (await PL.getLastUsed()) || list[0] || null;
-    setActive(last);
+    setAllNames(names);
+    setActiveName(last ?? null);
 
     if (last) {
-      const songsOfLast = await PL.getSongs(last);
-      setRawSongs(songsOfLast);
+      const listSongs = await PL.getSongs(last);
+      setRawSongs(listSongs);
     } else {
       setRawSongs([]);
     }
   }, []);
 
+  // reload mỗi lần tab này focus
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load])
+      reloadAll();
+    }, [reloadAll])
   );
 
-  // sort danh sách bài hát trong playlist theo sortBy
+  // sắp xếp bài trong playlist đang active
   const songs = useMemo(() => {
     if (sortBy === 'title') {
       return [...rawSongs].sort((a, b) => a.title.localeCompare(b.title));
@@ -61,49 +60,31 @@ export default function PlaylistsScreen() {
     if (sortBy === 'artist') {
       return [...rawSongs].sort((a, b) => a.artist.localeCompare(b.artist));
     }
-    // 'added' => giữ nguyên thứ tự đã lưu
     return rawSongs;
   }, [rawSongs, sortBy]);
 
-  // chọn playlist (tap vào tag)
-  const select = async (name: string) => {
-    setActive(name);
+  // chọn / rename / xoá playlist
+  const handleSelectPlaylist = async (name: string) => {
     await PL.setLastUsed(name);
-    const list = await PL.getSongs(name);
-    setRawSongs(list);
+    setActiveName(name);
+    const listSongs = await PL.getSongs(name);
+    setRawSongs(listSongs);
   };
 
-  // tạo playlist mới
-  const addNew = async () => {
-    const name = creating.trim();
-    if (!name) return;
-    await PL.createPlaylist(name);
-    setCreating('');
-    await load();
-    setActive(name);
+  const handleRenamePlaylist = (oldName: string) => {
+    Alert.prompt?.(
+      'Đổi tên playlist',
+      oldName,
+      async (typed) => {
+        const clean = (typed || '').trim();
+        if (!clean) return;
+        await PL.renamePlaylist(oldName, clean);
+        await reloadAll();
+      }
+    );
   };
 
-  // đổi tên playlist (long press tag)
-  const rename = async (oldName: string) => {
-    // iOS có Alert.prompt, Android không. Nếu Alert.prompt không tồn tại thì ta fallback báo alert.
-    if (Alert.prompt) {
-      Alert.prompt('Đổi tên playlist', oldName, async (newName) => {
-        const n = (newName || '').trim();
-        if (!n) return;
-        await PL.renamePlaylist(oldName, n);
-        await load();
-        setActive(n);
-      });
-    } else {
-      Alert.alert(
-        'Không hỗ trợ đổi tên',
-        'Thiết bị này không hỗ trợ Alert.prompt(). Bạn có thể tự sửa logic rename để mở 1 modal nhập tên mới.'
-      );
-    }
-  };
-
-  // xoá playlist
-  const removeList = async (name: string) => {
+  const handleDeletePlaylist = (name: string) => {
     Alert.alert('Xoá playlist', `Xoá "${name}"?`, [
       { text: 'Huỷ' },
       {
@@ -111,15 +92,42 @@ export default function PlaylistsScreen() {
         style: 'destructive',
         onPress: async () => {
           await PL.deletePlaylist(name);
-          await load();
+          await reloadAll();
         },
       },
     ]);
   };
 
-  // phát nhạc từ bài X trong playlist hiện tại
-  const playFrom = (index: number) => {
-    if (!active) return;
+  // tạo playlist mới
+  const handleCreatePlaylist = async () => {
+    const name = newName.trim();
+    if (!name) return;
+
+    await PL.createPlaylist(name);
+    await PL.setLastUsed(name);
+
+    setNewName('');
+    await reloadAll();
+  };
+
+  // clear tất cả playlists
+  const handleClearAll = () => {
+    Alert.alert('Xoá tất cả', 'Bạn muốn xoá TẤT CẢ playlists?', [
+      { text: 'Huỷ' },
+      {
+        text: 'Xoá',
+        style: 'destructive',
+        onPress: async () => {
+          await PL.clearAll();
+          await reloadAll();
+        },
+      },
+    ]);
+  };
+
+  // phát nhạc trong playlist hiện tại
+  const handlePlayFrom = (index: number) => {
+    if (!activeName) return;
     router.replace({
       pathname: '/player',
       params: {
@@ -130,46 +138,60 @@ export default function PlaylistsScreen() {
   };
 
   // xoá 1 bài khỏi playlist hiện tại
-  const removeSongFrom = async (id: string) => {
-    if (!active) return;
-    await PL.removeSong(active, id);
-    const updated = await PL.getSongs(active);
-    setRawSongs(updated);
-  };
-
-  // xoá toàn bộ playlists (Clear All)
-  const clearAllPlaylists = async () => {
-    Alert.alert('Xoá tất cả', 'Bạn chắc chắn muốn xoá toàn bộ playlists?', [
-      { text: 'Huỷ' },
-      {
-        text: 'Xoá',
-        style: 'destructive',
-        onPress: async () => {
-          await PL.clearAll();
-          await load();
-        },
-      },
-    ]);
+  const handleRemoveSong = async (songId: string) => {
+    if (!activeName) return;
+    await PL.removeSong(activeName, songId);
+    const nextList = await PL.getSongs(activeName);
+    setRawSongs(nextList);
   };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* HEADER */}
-      <View style={styles.headerRow}>
-        <Text style={[styles.header, { color: colors.text }]}>
-          Playlists ({names.length})
+      <View
+        style={[
+          styles.headerRow,
+          { borderBottomColor: colors.border },
+        ]}
+      >
+        <Text
+          style={[
+            styles.headerTitle,
+            { color: colors.text },
+          ]}
+        >
+          Playlists ({allNames.length})
         </Text>
+
+        {!!allNames.length && (
+          <TouchableOpacity
+            onPress={handleClearAll}
+            style={[
+              styles.clearBtn,
+              { backgroundColor: '#e0245e' },
+            ]}
+          >
+            <Text
+              style={{
+                color: '#fff',
+                fontWeight: '700',
+              }}
+            >
+              Clear All
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Ô tạo playlist mới */}
-      <View style={styles.newRow}>
+      {/* Ô tạo playlist */}
+      <View style={styles.createRow}>
         <TextInput
           placeholder="Tên playlist mới..."
           placeholderTextColor={colors.sub as string}
-          value={creating}
-          onChangeText={setCreating}
+          value={newName}
+          onChangeText={setNewName}
           style={[
-            styles.input,
+            styles.textInput,
             {
               backgroundColor: colors.inputBg,
               color: colors.text,
@@ -177,120 +199,102 @@ export default function PlaylistsScreen() {
             },
           ]}
         />
-
         <TouchableOpacity
+          onPress={handleCreatePlaylist}
           style={[
             styles.addBtn,
             { backgroundColor: colors.primary },
           ]}
-          onPress={addNew}
         >
           <Ionicons name="add" size={18} color="#fff" />
         </TouchableOpacity>
       </View>
 
-      {/* Thanh sort + nút Clear All */}
-      <View style={styles.toolbarRow}>
-        {/* Sort chips */}
-        <View style={styles.sortGroup}>
-          <Text style={{ color: colors.sub, marginRight: 8 }}>Sort:</Text>
+      {/* SORT ROW */}
+      <View style={styles.sortRow}>
+        <Text style={{ color: colors.sub, fontSize: 14 }}>
+          Sort:
+        </Text>
 
-          {(['added', 'title', 'artist'] as SortKey[]).map((k) => {
-            const activeChip = sortBy === k;
-            return (
-              <TouchableOpacity
-                key={k}
-                onPress={() => setSortBy(k)}
-                style={[
-                    styles.sortChip,
-                    {
-                      backgroundColor: activeChip
-                        ? colors.primary
-                        : colors.card,
-                      borderColor: colors.border,
-                      borderWidth: activeChip ? 0 : 1,
-                    },
-                ]}
-              >
-                <Text
-                  style={{
-                    color: activeChip ? '#fff' : colors.text,
-                    fontWeight: '700',
-                    fontSize: 12,
-                  }}
-                >
-                  {k === 'added'
-                    ? 'Ngày thêm'
-                    : k === 'title'
-                    ? 'Tên bài'
-                    : 'Nghệ sĩ'}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* Clear All playlists */}
-        {!!names.length && (
-          <TouchableOpacity
-            onPress={clearAllPlaylists}
-            style={[
-              styles.clearBtn,
-              { backgroundColor: '#e0245e' },
-            ]}
-          >
-            <Text style={{ color: '#fff', fontWeight: '700' }}>
-              Clear All
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Danh sách playlist (tên playlist) */}
-      <FlatList
-        horizontal
-        data={names}
-        keyExtractor={(n) => n}
-        contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
-        showsHorizontalScrollIndicator={false}
-        renderItem={({ item }) => (
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {(['added', 'title', 'artist'] as SortKey[]).map(
+          (key) => (
             <TouchableOpacity
-              onPress={() => select(item)}
-              onLongPress={() => rename(item)}
+              key={key}
+              onPress={() => setSortBy(key)}
               style={[
-                styles.tag,
+                styles.sortChip,
                 {
                   backgroundColor:
-                    active === item ? colors.primary : colors.card,
+                    sortBy === key
+                      ? colors.primary
+                      : colors.card,
                   borderColor: colors.border,
-                  borderWidth: active === item ? 0 : 1,
                 },
               ]}
             >
               <Text
                 style={{
-                  color: active === item ? '#fff' : colors.text,
+                  color: '#fff',
+                  fontWeight: '700',
+                  fontSize: 12,
+                }}
+              >
+                {key === 'added'
+                  ? 'Ngày thêm'
+                  : key === 'title'
+                  ? 'Tên bài'
+                  : 'Nghệ sĩ'}
+              </Text>
+            </TouchableOpacity>
+          )
+        )}
+      </View>
+
+      {/* DANH SÁCH PLAYLIST NGANG */}
+      <FlatList
+        horizontal
+        data={allNames}
+        keyExtractor={(n) => n}
+        contentContainerStyle={{
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          gap: 8,
+        }}
+        showsHorizontalScrollIndicator={false}
+        renderItem={({ item }) => (
+          <View style={styles.playlistChipWrap}>
+            <TouchableOpacity
+              onPress={() => handleSelectPlaylist(item)}
+              onLongPress={() => handleRenamePlaylist(item)}
+              style={[
+                styles.playlistChip,
+                {
+                  backgroundColor:
+                    activeName === item
+                      ? colors.primary
+                      : colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  color: '#fff',
                   fontWeight: '600',
                 }}
               >
                 {item}
               </Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={() => removeList(item)}
-                style={[
-                  styles.tagDel,
-                  {
-                    backgroundColor:
-                      active === item
-                        ? 'rgba(0,0,0,0.25)'
-                        : 'rgba(0,0,0,0.15)',
-                  },
-                ]}
-              >
-                <Ionicons name="close" size={12} color="#fff" />
-              </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleDeletePlaylist(item)}
+              style={[
+                styles.delChip,
+                { backgroundColor: '#00000040' },
+              ]}
+            >
+              <Ionicons name="close" size={12} color="#fff" />
             </TouchableOpacity>
           </View>
         )}
@@ -299,6 +303,7 @@ export default function PlaylistsScreen() {
             style={{
               color: colors.sub,
               paddingHorizontal: 12,
+              fontSize: 14,
             }}
           >
             Chưa có playlist. Tạo mới ở trên.
@@ -306,59 +311,47 @@ export default function PlaylistsScreen() {
         }
       />
 
-      {/* Danh sách bài hát trong playlist đang chọn */}
-      {active && (
+      {/* BÀI TRONG PLAYLIST ACTIVE */}
+      {activeName && (
         <>
           <Text
             style={[
-              styles.subHeader,
+              styles.sectionHeader,
               { color: colors.text },
             ]}
           >
-            Playlist: {active}
+            Playlist: {activeName}
           </Text>
 
           <FlatList
             data={songs}
             keyExtractor={(it, idx) => it.id + '-' + idx}
-            contentContainerStyle={{ padding: 12, gap: 12 }}
-            showsVerticalScrollIndicator={false}
-            ListEmptyComponent={
-              <Text
-                style={{
-                  color: colors.sub,
-                  paddingHorizontal: 12,
-                }}
-              >
-                Playlist trống.
-              </Text>
-            }
+            contentContainerStyle={{
+              padding: 12,
+              gap: 12,
+            }}
             renderItem={({ item, index }) => (
               <View
                 style={[
-                  styles.card,
+                  styles.songRow,
                   {
                     backgroundColor: colors.card,
                     borderColor: colors.border,
-                    borderWidth: 1,
                   },
                 ]}
               >
                 <TouchableOpacity
-                  style={styles.cardLeft}
-                  onPress={() => playFrom(index)}
+                  style={styles.songLeft}
+                  onPress={() => handlePlayFrom(index)}
                 >
                   <Image
                     source={{ uri: item.cover }}
-                    style={[
-                      styles.cover,
-                      { backgroundColor: colors.border },
-                    ]}
+                    style={styles.cover}
                   />
                   <View style={{ flex: 1 }}>
                     <Text
                       style={[
-                        styles.title,
+                        styles.songTitle,
                         { color: colors.text },
                       ]}
                       numberOfLines={1}
@@ -375,16 +368,30 @@ export default function PlaylistsScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  onPress={() => removeSongFrom(item.id)}
+                  onPress={() => handleRemoveSong(item.id)}
                   style={[
                     styles.removeBtn,
                     { backgroundColor: '#ef4444' },
                   ]}
                 >
-                  <Ionicons name="trash" size={16} color="#fff" />
+                  <Ionicons
+                    name="trash"
+                    size={16}
+                    color="#fff"
+                  />
                 </TouchableOpacity>
               </View>
             )}
+            ListEmptyComponent={
+              <Text
+                style={{
+                  color: colors.sub,
+                  paddingHorizontal: 12,
+                }}
+              >
+                Playlist trống.
+              </Text>
+            }
           />
         </>
       )}
@@ -393,66 +400,20 @@ export default function PlaylistsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
 
   headerRow: {
-    padding: 12,
-    paddingBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
 
-  header: {
+  headerTitle: {
     fontSize: 18,
     fontWeight: '800',
-  },
-
-  // tạo playlist
-  newRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    alignItems: 'center',
-  },
-  input: {
-    flex: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 40,
-    borderWidth: 1,
-    fontSize: 15,
-  },
-  addBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // thanh sort + clear all
-  toolbarRow: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  sortGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  sortChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
   },
 
   clearBtn: {
@@ -461,54 +422,103 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
 
-  // list playlist names (tags)
-  tag: {
+  createRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    gap: 8,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    marginVertical: 4,
+    paddingVertical: 12,
   },
-  tagDel: {
-    marginLeft: 6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+
+  textInput: {
+    flex: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 40,
+    borderWidth: 1,
+    fontSize: 15,
+  },
+
+  addBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  subHeader: {
+  sortRow: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+
+  sortChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+
+  playlistChipWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  playlistChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    marginRight: 4,
+  },
+
+  delChip: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    alignSelf: 'center',
+  },
+
+  sectionHeader: {
     fontSize: 16,
     fontWeight: '700',
     paddingHorizontal: 12,
     paddingTop: 10,
   },
 
-  card: {
+  songRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 14,
     padding: 12,
+    borderWidth: 1,
     justifyContent: 'space-between',
   },
-  cardLeft: {
+
+  songLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
     gap: 12,
   },
+
   cover: {
     width: 56,
     height: 56,
     borderRadius: 8,
+    backgroundColor: '#111',
   },
-  title: {
+
+  songTitle: {
     fontWeight: '700',
-    fontSize: 15,
   },
+
   removeBtn: {
     width: 36,
     height: 36,
