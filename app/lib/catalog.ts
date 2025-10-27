@@ -7,7 +7,7 @@ export type Song = {
   cover: string;
 };
 
-// ✅ danh sách nhạc demo — bạn có thể thay bằng dữ liệu thật
+// Danh sách nhạc demo
 export const SONGS: Song[] = [
   {
     id: '1',
@@ -45,3 +45,5 @@ export const SONGS: Song[] = [
     cover: 'https://picsum.photos/seed/5/800',
   },
 ];
+
+export default SONGS;
